@@ -1,0 +1,154 @@
+---
+title: "2.POSTER_PRES"
+author: "Matthew Bayly"
+date: "Sunday, November 06, 2014"
+output: html_document
+---
+
+## **INDEX**
+
+
+
+1. **LM FOR STARTING SIZE & POTENTIAL** & varibale levels
+    + 1A: Convert size classes to numerica (increasing)
+    +       Work with spring growth only
+    +       Work with spring growth only (MID.total.height)
+    + 1B: CONVERT D TO ZERO (GROWTH W/SURV)
+    + 1C: try with L=3, L=4, M=4, M=3
+    + 1D: Predict values to df
+    
+2. **SPRING GROWTH**
+    + 2a MID SUMMER / STARTING POTENTIAL
+    + 2b LOOP THROUGH SITES & AVERAGE FOR PLOTS IN SITE
+    + 2C REPEAT PROCESS FOR END OF SUMMER GROWTH
+    + 2D EXAMIN & CONSIDER?
+
+
+    
+### _Set directories for computer_ ###
+```{r}
+path.root="C:/Users/DW/Desktop/transplant_analysis/" 
+path.dat=paste(path.root, "/Data", sep="") # MAIN DATA FILES
+path.dat.raw=paste(path.dat, "/raw_data", sep="") # Don't write here!
+path.code=paste(path.root, "/Rcode", sep="") # Source Code
+path.obj=paste(path.root, "/Robjects", sep="") # To store temporary objects
+path.fig=paste(path.root, "/Figures", sep="") # Polished & exploratory figures
+
+setwd(path.dat); setwd(path.dat.raw); setwd(path.code); setwd(path.fig); setwd(path.obj)
+```
+
+Open 2014 plant datafile 
+```{r}
+setwd(path.dat.raw)
+plantdat <- read.csv(file="plantdata.csv")
+dim(plantdat); #colnames(plantdat)
+
+# check whole data structure
+#str(plantdat)
+```
+
+
+** 1A: Convert size classes to numeric (increasing) **
+```{r}
+summary(plantdat$MID.total.height) #OK, zero inflated
+summary(plantdat$FALL.total.height) #OK, super zero inflated
+
+# remove seeds 
+plantdat <- plantdat[ !grepl("SEED", plantdat$pot) , ]
+summary(plantdat$pot) 
+
+# replace values
+plantdat$pot <- as.character(plantdat$pot)
+plantdat$pot[plantdat$pot=="XL"]<-5
+plantdat$pot[plantdat$pot=="XS"]<-1
+plantdat$pot[plantdat$pot=="S"]<-2
+
+#LARGE & MEDIUM MIGHT HAVE TO SWITCH
+plantdat$pot[plantdat$pot=="L"]<-4
+plantdat$pot[plantdat$pot=="M"]<-3
+plantdat$pot <- as.numeric(plantdat$pot) # BACK TO NUMERIC
+summary(plantdat$pot) 
+
+```
+** 1B: FIT QUICK LINEAR MODEL spring **
+SHOULD HAVE POT(AGE) AND INITIAL START SIZE AS PREDICTOR VARIABLES TO SPRING GROWTH & SURVIVORSHIP. also try with & without zeros
+
+```{r}
+# QUICK NORMALITY CHECK 
+hist(plantdat$MID.total.height) # nope, definatly not
+hist(log(plantdat$MID.total.height + 1)) # hahaha
+hist(log(plantdat$start.height + 1)) # hahahah
+hist(plantdat$start.height)
+# SHOULD TRY WITH & WITHOUT ZEROS 
+plantdat$start.height <- log(plantdat$start.height + 1)
+
+# zeros removed & vars log trans
+plantdat$FALL.total.height[plantdat$FALL.total.height > 0] <- 1
+
+
+z1 <- glm(plantdat$FALL.total.height ~ plantdat$start.height + plantdat$pot, family = binomial(link="logit"), data = plantdat)
+z2 <- glm(plantdat$FALL.total.height ~ plantdat$start.height + plantdat$pot + plantdat$start.height:plantdat$pot, family = binomial(link="logit"), data = plantdat)  
+
+summary(preddom)
+preddom <- plantdat[ ,c('ID', 'FALL.total.height', 'start.height', 'pot')]
+preddom <- na.omit(preddom)
+
+mod1.LR=glm(mod.form.quad(preddom,2,3),family=binomial,data=preddom)
+mod1.pred=predict(mod1.LR,type="response") # model prediction
+mod2.LR=step(mod1.LR,trace=F) # backwards stepwise variable reduction
+mod2.pred=predict(mod2.LR,type="response") 
+dim(plantdat); dim(preddom); length(mod2.pred)
+meggr <- cbind(mod2.pred, preddom)
+
+plot(mod2.pred)
+
+
+plantdat2 <- merge(plantdat, meggr, by.x = "ID", by.y = "ID", all.x = FALSE, all.y=TRUE)
+#tail(plantdat2)
+plantdat3 <- plantdat2
+
+plantdat3$fin_sur <- plantdat3$FALL.total.height.y - plantdat3$mod2.pred
+hist(plantdat3$fin_sur)
+
+plantdat3$site_fac <- factor(plantdat3$site, levels = c("THOMAS", "MOSBY",  "WILEY", "HUNTER", "CALAPOOIA", "COAST", "LOOK", "ROCK"))
+levels(plantdat3$site)
+levels(plantdat3$site_fac)
+boxplot(plantdat3$fin_sur ~ plantdat3$site_fac, col=c("blue", "green", "blue", "blue", "blue", "yellow", "green", "yellow"))
+
+# average down to plot level for sites
+
+frame <- data.frame(matrix(NA, nrow = 1, ncol = 2))
+colnames(frame) <- c("fin_sur", "site")
+
+sites <- c("THOMAS", "MOSBY",  "WILEY", "HUNTER", "CALAPOOIA", "COAST", "LOOK", "ROCK")
+for(i in 1:length(sites)){
+  current <- plantdat3[which(plantdat3$site==paste(sites[i])), ]
+  final <- tapply(current$fin_sur, current$plot, mean)
+  final <- data.frame(final)
+  final$siteR <- paste(sites[i])
+  colnames(final) <- c("fin_sur", "site")
+  frame <- rbind(frame, final); rm(final) 
+}
+str(frame)
+head(frame)
+tail(frame)
+dim(frame)
+frame <- frame[2:nrow(frame), ]
+
+frame$site <- factor(frame$site, levels = c("THOMAS", "MOSBY",  "WILEY", "HUNTER", "CALAPOOIA", "COAST", "LOOK", "ROCK"))
+boxplot(frame$fin_sur ~ frame$site, col=c("lightblue", "green", "lightblue", "lightblue", "lightblue", "green", "green", "green"), ylab="", xaxt = "n")
+axis(1, at=1:8, labels=FALSE)
+names <- levels(frame$site)
+text(cex=1.1, x=seq(0.6, 7.6, by=1), y=-1, names, xpd=TRUE, srt=45)
+frame
+
+###################
+#barplots
+
+frame1 <- frame[complete.cases(frame$FALL),] 
+frame2 <- tapply(frame1$FALL, frame1$site, mean)
+barplot(frame2)
+
+
+
+```
